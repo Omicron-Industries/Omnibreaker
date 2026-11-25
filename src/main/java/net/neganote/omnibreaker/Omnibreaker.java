@@ -4,7 +4,6 @@ import net.neganote.omnibreaker.common.OmniItems;
 import net.neganote.omnibreaker.common.item.OmniDataComponents;
 import net.neganote.omnibreaker.datagen.OmniDatagen;
 
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
@@ -23,7 +22,6 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.transfer.access.ItemAccess;
 import net.neoforged.neoforge.transfer.energy.ItemAccessEnergyHandler;
-import net.neoforged.neoforge.transfer.transaction.Transaction;
 
 import com.mojang.logging.LogUtils;
 import com.tterrag.registrate.Registrate;
@@ -51,14 +49,8 @@ public class Omnibreaker {
                     .icon(() -> new ItemStack(OmniItems.OMNIBREAKER.get()))
                     .displayItems((itemDisplayParameters, output) -> {
                         if (Config.USE_ENERGY.get()) {
-                            var tab = REGISTRATE.get("omnibreaker", Registries.CREATIVE_MODE_TAB);
                             ItemStack fullOmnibreaker = new ItemStack(OmniItems.OMNIBREAKER.get());
-                            var energyStored = fullOmnibreaker.getCapability(Capabilities.Energy.ITEM,
-                                    ItemAccess.forStack(fullOmnibreaker));
-                            assert energyStored != null;
-                            try (Transaction t = Transaction.openRoot()) {
-                                energyStored.insert(Config.CAPACITY.getAsInt(), t);
-                            }
+                            fullOmnibreaker.set(OmniDataComponents.STORED_ENERGY, Config.CAPACITY.getAsInt());
                             output.accept(fullOmnibreaker);
                         }
 
@@ -108,7 +100,7 @@ public class Omnibreaker {
 
     public void registerCapabilities(RegisterCapabilitiesEvent event) {
         event.registerItem(Capabilities.Energy.ITEM,
-                (ItemStack stack, ItemAccess access) -> new ItemAccessEnergyHandler(access,
+                (ItemStack stack, ItemAccess access) -> new ItemAccessEnergyHandler(ItemAccess.forStack(stack),
                         OmniDataComponents.STORED_ENERGY.get(), Config.CAPACITY.getAsInt()),
                 OmniItems.OMNIBREAKER.get());
     }

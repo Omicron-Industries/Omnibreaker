@@ -84,6 +84,7 @@ public class OmniBreakerItem extends Item {
         if (rand <= chance && USE_ENERGY.get()) {
             try (Transaction t = Transaction.openRoot()) {
                 handler.extract(ENERGY_PER_USE.get(), t);
+                t.commit();
             }
         }
 
@@ -109,7 +110,8 @@ public class OmniBreakerItem extends Item {
         double chance = 1.0 / (unbreaking + 1);
         double rand = Math.random();
 
-        EnergyHandler storage = getEnergyHandler(itemStack);
+        EnergyHandler storage = getEnergyHandler(itemStack,
+                ItemAccess.forPlayerInteraction(context.getPlayer(), context.getHand()));
         assert storage != null;
 
         if (storage.getAmountAsInt() < ENERGY_PER_USE.get() && USE_ENERGY.get()) {
@@ -131,6 +133,7 @@ public class OmniBreakerItem extends Item {
             if (rand <= chance && USE_ENERGY.get()) {
                 try (Transaction t = Transaction.openRoot()) {
                     storage.extract(ENERGY_PER_USE.get(), t);
+                    t.commit();
                 }
 
             }
@@ -177,5 +180,9 @@ public class OmniBreakerItem extends Item {
 
     private static @Nullable EnergyHandler getEnergyHandler(ItemStack stack) {
         return stack.getCapability(Capabilities.Energy.ITEM, ItemAccess.forStack(stack));
+    }
+
+    private static @Nullable EnergyHandler getEnergyHandler(ItemStack stack, ItemAccess access) {
+        return stack.getCapability(Capabilities.Energy.ITEM, access);
     }
 }
