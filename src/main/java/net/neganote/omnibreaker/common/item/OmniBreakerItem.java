@@ -1,24 +1,20 @@
 package net.neganote.omnibreaker.common.item;
 
-import net.neganote.omnibreaker.Config;
-import net.neganote.omnibreaker.common.capabilities.StoredEnergy;
-
 import net.minecraft.ChatFormatting;
-import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Mth;
+import net.minecraft.util.ARGB;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -26,12 +22,16 @@ import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.energy.IEnergyStorage;
+import net.neoforged.neoforge.transfer.access.ItemAccess;
+import net.neoforged.neoforge.transfer.energy.EnergyHandler;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
 
+import com.mojang.logging.annotations.MethodsReturnNonnullByDefault;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import javax.annotation.ParametersAreNonnullByDefault;
 
@@ -49,32 +49,32 @@ public class OmniBreakerItem extends Item {
 
     @Override
     public boolean isCorrectToolForDrops(ItemStack stack, BlockState state) {
-        IEnergyStorage storage = getEnergyStorage(stack);
+        EnergyHandler storage = getEnergyHandler(stack);
         assert storage != null;
 
-        return storage.getEnergyStored() >= ENERGY_PER_USE.get() || !USE_ENERGY.get();
+        return storage.getAmountAsInt() >= ENERGY_PER_USE.get() || !USE_ENERGY.get();
     }
 
     @Override
     public float getDestroySpeed(ItemStack stack, BlockState state) {
-        IEnergyStorage storage = getEnergyStorage(stack);
+        EnergyHandler storage = getEnergyHandler(stack);
         assert storage != null;
 
-        return storage.getEnergyStored() >= ENERGY_PER_USE.get() || !USE_ENERGY.get() ? 100_000f : 0f;
+        return storage.getAmountAsInt() >= ENERGY_PER_USE.get() || !USE_ENERGY.get() ? 100_000f : 0f;
     }
 
     private int getEnchantLevel(ItemStack stack, Level level, ResourceKey<Enchantment> enchantment) {
         return level.registryAccess()
-                .registryOrThrow(Registries.ENCHANTMENT)
-                .getHolder(enchantment)
+                .lookupOrThrow(Registries.ENCHANTMENT)
+                .get(enchantment)
                 .map(holder -> EnchantmentHelper.getTagEnchantmentLevel(holder, stack))
                 .orElse(0);
     }
 
     @Override
     public boolean mineBlock(ItemStack stack, Level level, BlockState state, BlockPos pos, LivingEntity miningEntity) {
-        IEnergyStorage storage = getEnergyStorage(stack);
-        assert storage != null;
+        EnergyHandler handler = getEnergyHandler(stack);
+        assert handler != null;
 
         var unbreaking = getEnchantLevel(stack, level, Enchantments.UNBREAKING);
 
@@ -82,7 +82,9 @@ public class OmniBreakerItem extends Item {
         double rand = Math.random();
 
         if (rand <= chance && USE_ENERGY.get()) {
-            storage.extractEnergy(ENERGY_PER_USE.get(), false);
+            try (Transaction t = Transaction.openRoot()) {
+                handler.extract(ENERGY_PER_USE.get(), t);
+            }
         }
 
         return true;
@@ -107,10 +109,10 @@ public class OmniBreakerItem extends Item {
         double chance = 1.0 / (unbreaking + 1);
         double rand = Math.random();
 
-        IEnergyStorage storage = getEnergyStorage(itemStack);
+        EnergyHandler storage = getEnergyHandler(itemStack);
         assert storage != null;
 
-        if (storage.getEnergyStored() < ENERGY_PER_USE.get() && USE_ENERGY.get()) {
+        if (storage.getAmountAsInt() < ENERGY_PER_USE.get() && USE_ENERGY.get()) {
             return InteractionResult.PASS;
         }
 
@@ -127,16 +129,14 @@ public class OmniBreakerItem extends Item {
                 level.addFreshEntity(entity);
             }
             if (rand <= chance && USE_ENERGY.get()) {
-                storage.extractEnergy(ENERGY_PER_USE.get(), false);
+                try (Transaction t = Transaction.openRoot()) {
+                    storage.extract(ENERGY_PER_USE.get(), t);
+                }
+
             }
         }
 
         return InteractionResult.SUCCESS;
-    }
-
-    @Override
-    public int getEnchantmentValue(ItemStack stack) {
-        return 22;
     }
 
     @Override
@@ -145,35 +145,16 @@ public class OmniBreakerItem extends Item {
     }
 
     @Override
-    public boolean isBookEnchantable(ItemStack stack, ItemStack book) {
-        var enchantments = book.get(DataComponents.STORED_ENCHANTMENTS);
-        if (enchantments == null) {
-            return false;
-        }
-        for (Holder<Enchantment> enchantment : enchantments.keySet()) {
-            if (enchantment.is(Enchantments.UNBREAKING) || enchantment.is(Enchantments.SILK_TOUCH)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    @Override
-    public boolean isEnchantable(ItemStack stack) {
-        return true;
-    }
-
-    @Override
-    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltipComponents,
-                                TooltipFlag tooltipFlag) {
-        IEnergyStorage storage = getEnergyStorage(stack);
-        assert storage != null;
-
-        tooltipComponents.add(Component.translatable("tooltip.omnibreaker.can_break_anything"));
-        tooltipComponents.add(Component.translatable("tooltip.omnibreaker.right_click_function"));
+    @SuppressWarnings("deprecation")
+    public void appendHoverText(ItemStack itemStack, TooltipContext context, TooltipDisplay display,
+                                Consumer<Component> builder, TooltipFlag tooltipFlag) {
+        builder.accept(Component.translatable("tooltip.omnibreaker.can_break_anything"));
+        builder.accept(Component.translatable("tooltip.omnibreaker.right_click_function"));
         if (USE_ENERGY.get()) {
-            tooltipComponents.add(Component.translatable("tooltip.omnibreaker.energy", storage.getEnergyStored(),
-                    storage.getMaxEnergyStored()).withStyle(ChatFormatting.AQUA));
+            EnergyHandler handler = getEnergyHandler(itemStack);
+            assert handler != null;
+            builder.accept(Component.translatable("tooltip.omnibreaker.energy", handler.getAmountAsInt(),
+                    handler.getCapacityAsInt()).withStyle(ChatFormatting.AQUA));
         }
     }
 
@@ -184,67 +165,17 @@ public class OmniBreakerItem extends Item {
 
     @Override
     public int getBarWidth(ItemStack stack) {
-        IEnergyStorage storage = getEnergyStorage(stack);
+        EnergyHandler storage = getEnergyHandler(stack);
         assert storage != null;
-        return Math.round((float) storage.getEnergyStored() * 13.0F / (float) storage.getMaxEnergyStored());
+        return Math.round((float) storage.getAmountAsInt() * 13.0F / (float) storage.getCapacityAsInt());
     }
 
     @Override
     public int getBarColor(ItemStack stack) {
-        return Mth.color(0.0f, 1.0f, 1.0f);
+        return ARGB.colorFromFloat(1.0f, 0.0f, 1.0f, 1.0f);
     }
 
-    private static @Nullable IEnergyStorage getEnergyStorage(ItemStack stack) {
-        return stack.getCapability(Capabilities.EnergyStorage.ITEM);
-    }
-
-    public record EnergyStorage(ItemStack stack) implements IEnergyStorage {
-
-        private static final int CAPACITY = Config.CAPACITY.get();
-
-        @Override
-        public int receiveEnergy(int amount, boolean simulated) {
-            int stored = getEnergyStored();
-            int received = Math.min(amount, CAPACITY - stored);
-
-            if (!simulated) {
-                stack.set(OmniDataComponents.STORED_ENERGY.value(), new StoredEnergy(stored + received));
-            }
-
-            return received;
-        }
-
-        @Override
-        public int extractEnergy(int amount, boolean simulated) {
-            int stored = getEnergyStored();
-            int extracted = Math.min(amount, stored);
-
-            if (!simulated) {
-                stack.set(OmniDataComponents.STORED_ENERGY.value(), new StoredEnergy(stored - extracted));
-            }
-
-            return extracted;
-        }
-
-        @Override
-        public int getEnergyStored() {
-            var storedEnergy = stack.get(OmniDataComponents.STORED_ENERGY.value());
-            return storedEnergy == null ? 0 : storedEnergy.energy();
-        }
-
-        @Override
-        public int getMaxEnergyStored() {
-            return CAPACITY;
-        }
-
-        @Override
-        public boolean canExtract() {
-            return false;
-        }
-
-        @Override
-        public boolean canReceive() {
-            return true;
-        }
+    private static @Nullable EnergyHandler getEnergyHandler(ItemStack stack) {
+        return stack.getCapability(Capabilities.Energy.ITEM, ItemAccess.forStack(stack));
     }
 }

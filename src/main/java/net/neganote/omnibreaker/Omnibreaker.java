@@ -1,12 +1,11 @@
 package net.neganote.omnibreaker;
 
 import net.neganote.omnibreaker.common.OmniItems;
-import net.neganote.omnibreaker.common.item.OmniBreakerItem;
 import net.neganote.omnibreaker.common.item.OmniDataComponents;
 import net.neganote.omnibreaker.datagen.OmniDatagen;
 
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
@@ -22,6 +21,9 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.transfer.access.ItemAccess;
+import net.neoforged.neoforge.transfer.energy.ItemAccessEnergyHandler;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
 
 import com.mojang.logging.LogUtils;
 import com.tterrag.registrate.Registrate;
@@ -48,13 +50,15 @@ public class Omnibreaker {
                     .title(REGISTRATE.addLang("itemGroup", Omnibreaker.id("creative_tab"), "Omni-breaker"))
                     .icon(() -> new ItemStack(OmniItems.OMNIBREAKER.get()))
                     .displayItems((itemDisplayParameters, output) -> {
-
                         if (Config.USE_ENERGY.get()) {
                             var tab = REGISTRATE.get("omnibreaker", Registries.CREATIVE_MODE_TAB);
                             ItemStack fullOmnibreaker = new ItemStack(OmniItems.OMNIBREAKER.get());
-                            var energyStored = fullOmnibreaker.getCapability(Capabilities.EnergyStorage.ITEM);
+                            var energyStored = fullOmnibreaker.getCapability(Capabilities.Energy.ITEM,
+                                    ItemAccess.forStack(fullOmnibreaker));
                             assert energyStored != null;
-                            energyStored.receiveEnergy(energyStored.getMaxEnergyStored(), false);
+                            try (Transaction t = Transaction.openRoot()) {
+                                energyStored.insert(Config.CAPACITY.getAsInt(), t);
+                            }
                             output.accept(fullOmnibreaker);
                         }
 
@@ -98,13 +102,14 @@ public class Omnibreaker {
         public static void onClientSetup(FMLClientSetupEvent event) {}
     }
 
-    public static ResourceLocation id(String location) {
-        return ResourceLocation.fromNamespaceAndPath(MOD_ID, location);
+    public static Identifier id(String location) {
+        return Identifier.fromNamespaceAndPath(MOD_ID, location);
     }
 
     public void registerCapabilities(RegisterCapabilitiesEvent event) {
-        event.registerItem(Capabilities.EnergyStorage.ITEM,
-                (ItemStack stack, Void unused) -> new OmniBreakerItem.EnergyStorage(stack),
+        event.registerItem(Capabilities.Energy.ITEM,
+                (ItemStack stack, ItemAccess access) -> new ItemAccessEnergyHandler(access,
+                        OmniDataComponents.STORED_ENERGY.get(), Config.CAPACITY.getAsInt()),
                 OmniItems.OMNIBREAKER.get());
     }
 }
