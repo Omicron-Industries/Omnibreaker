@@ -27,7 +27,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
-          java-version: 21
+          java-version: 25
 
       - name: Setup Gradle Caches
         uses: actions/cache@v3
@@ -61,7 +61,7 @@ jobs:
 
           github-token: ${{ secrets.GITHUB_TOKEN }}
           github-generate-changelog: true
-          github-tag: "1.21.1-${{ steps.gradle_properties.outputs.mod_version }}"
+          github-tag: "26.1.2-${{ steps.gradle_properties.outputs.mod_version }}"
 
           files: ./build/libs/!(*-@(dev|sources|dev-slim)).jar
           name: "Omni-breaker ${{ steps.gradle_properties.outputs.mod_version }} for NeoForge"
@@ -69,4 +69,4 @@ jobs:
           version-type: ${{ inputs.version_type }}
           changelog-file: changelog.md
           loaders: neoforge
-          game-versions: 1.21.1
+          game-versions: 26.1.2
